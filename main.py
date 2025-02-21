@@ -1,15 +1,5 @@
 import subprocess
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from rdkit import Chem
-from rdkit.Chem import AllChem
-import pandas as pd
-import numpy as np
-import os
-import urllib.request
-from tqdm import tqdm
+
 '''
 # Install required packages
 def install_packages():
@@ -29,7 +19,18 @@ def install_packages():
 
 install_packages()
 '''
-
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from rdkit import Chem
+from rdkit.Chem import AllChem
+import pandas as pd
+import numpy as np
+import os
+import urllib.request
+from datasets import load_dataset
+from tqdm import tqdm
 
 
 class RetrosynthesisTransformer(nn.Module):
@@ -78,25 +79,34 @@ class ReactionDataset(Dataset):
         return seq[:self.max_len]
 
 def prepare_data():
-    url = "https://github.com/pschwllr/MolecularTransformer/raw/master/data/USPTO-50k.csv"
-    data_path = "USPTO-50k.csv"
+    # Load dataset from Hugging Face Hub in Parquet format
+    dataset = load_dataset("Phando/uspto-50k")
     
-    if not os.path.exists(data_path):
-        urllib.request.urlretrieve(url, data_path)
-        
-    df = pd.read_csv(data_path)
     reactions = []
-    chars = {'<PAD>', '<SOS>', '<EOS>'}
+    chars = {'<PAD>', '<SOS>', '<EOS>'}  # Initialize with special tokens
     
-    for _, row in df.iterrows():
-        parts = row['reactants>reagents>production'].split('>')
-        reactants = parts[0]
-        product = parts[-1]
-        reactions.append((product, reactants))
-        chars.update(product)
-        chars.update(reactants)
+    for split in ['train', 'validation']:
+        for item in dataset[split]:
+            # Extract product and reactants from dedicated columns
+            product = item['prod_smiles'].strip()
+            reactants = item['rxn_smiles'].strip()
+            
+            # Add to reactions list (product -> reactants mapping)
+            reactions.append((product, reactants))
+            
+            # Update character vocabulary
+            chars.update(product)
+            chars.update(reactants)
     
-    char_to_idx = {c: i for i, c in enumerate(sorted(chars))}
+    # Create comprehensive character mapping
+    all_chars = sorted(chars)
+    char_to_idx = {char: idx for idx, char in enumerate(all_chars)}
+    
+    # Verify special tokens positions
+    assert '<PAD>' in char_to_idx, "Special token missing in vocabulary"
+    assert '<SOS>' in char_to_idx, "Special token missing in vocabulary"
+    assert '<EOS>' in char_to_idx, "Special token missing in vocabulary"
+    
     return reactions, char_to_idx
 
 def train_model():
@@ -165,7 +175,7 @@ def predict_reactants(mol_file, model, char_to_idx, max_depth=3):
         return ''.join([idx_to_char[i] for i in outputs if i not in 
                       [char_to_idx['<SOS>'], char_to_idx['<EOS>'], char_to_idx['<PAD>']]])
     
-    def recursive_predict(smi, depth=0):
+    def recursive_predict(smi, depth=3):
         if depth >= max_depth:
             return {'molecule': smi, 'children': []}
         
