@@ -119,7 +119,7 @@ def train_model():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = RetrosynthesisTransformer(vocab_size).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    optimizer = optim.Adam(model.parameters(), lr=0.1)
     criterion = nn.CrossEntropyLoss(ignore_index=char_to_idx['<PAD>'])
     
     for epoch in range(10):
